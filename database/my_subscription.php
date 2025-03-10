@@ -2,318 +2,245 @@
 /**
  * Subscription Management Page
  * 
- * This page allows users to view and manage their subscription details
+ * Allows users to view and manage their subscription.
  */
+
+// Start session
+session_start();
 
 // Include database connection
 require_once 'db_connect.php';
 
-// Start session for user authentication
-session_start();
+// Initialize variables
+$error = '';
+$success = '';
 
-// Check if user is logged in, redirect if not
+// Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
+    // Redirect to login page
+    header('Location: login.php?redirect=my_subscription.php');
     exit();
 }
 
 $userId = $_SESSION['user_id'];
 
-// Get user details
+// Get user data
 $user = db_select("SELECT * FROM users WHERE id = ?", [$userId])[0] ?? null;
+
 if (!$user) {
-    die("User not found");
+    // Invalid user ID
+    session_destroy();
+    header('Location: login.php');
+    exit();
 }
 
-// Get current subscription if any
+// Get active subscription
 $subscription = db_select(
-    "SELECT s.*, p.name as plan_name, p.price, p.interval 
+    "SELECT s.*, p.name as plan_name, p.price, p.interval, p.features 
      FROM subscriptions s
      JOIN subscription_plans p ON s.plan_id = p.id
      WHERE s.user_id = ? AND s.status = 'active'
-     ORDER BY s.id DESC LIMIT 1", 
-    [$userId]
-)[0] ?? null;
-
-// Get available plans
-$availablePlans = db_select("SELECT * FROM subscription_plans WHERE is_active = 1 ORDER BY price ASC");
-
-// Handle subscription cancellation
-$cancelMessage = '';
-if (isset($_POST['cancel_subscription']) && $subscription) {
-    $result = db_update('subscriptions', 
-        ['cancel_at_period_end' => 1, 'canceled_at' => date('Y-m-d H:i:s')],
-        'id = ?', 
-        [$subscription['id']]
-    );
-    
-    if ($result) {
-        $cancelMessage = 'Your subscription has been set to cancel at the end of the billing period.';
-        // Refresh subscription data
-        $subscription = db_select(
-            "SELECT s.*, p.name as plan_name, p.price, p.interval 
-             FROM subscriptions s
-             JOIN subscription_plans p ON s.plan_id = p.id
-             WHERE s.id = ?", 
-            [$subscription['id']]
-        )[0] ?? null;
-    } else {
-        $cancelMessage = 'There was an error canceling your subscription. Please try again.';
-    }
-}
-
-// Get payment history
-$paymentHistory = db_select(
-    "SELECT p.*, s.plan_id, sp.name as plan_name 
-     FROM payments p
-     LEFT JOIN subscriptions s ON p.subscription_id = s.id
-     LEFT JOIN subscription_plans sp ON s.plan_id = sp.id
-     WHERE p.user_id = ?
-     ORDER BY p.created_at DESC",
+     ORDER BY s.created_at DESC LIMIT 1", 
     [$userId]
 );
 
-// Function to format dates
-function formatDate($date) {
-    return date('F j, Y', strtotime($date));
+// Get payment history
+$payments = db_select(
+    "SELECT * FROM payments 
+     WHERE user_id = ? 
+     ORDER BY created_at DESC 
+     LIMIT 10", 
+    [$userId]
+);
+
+// Process subscription cancellation
+if (isset($_POST['cancel_subscription']) && !empty($subscription)) {
+    try {
+        $subscriptionId = $subscription[0]['id'];
+        $paypalSubscriptionId = $subscription[0]['paypal_subscription_id'];
+        
+        // In a real application, you would call PayPal API to cancel the subscription
+        // For this example, we'll just update our database
+        
+        // Update subscription status
+        db_update(
+            'subscriptions',
+            [
+                'cancel_at_period_end' => 1,
+                'canceled_at' => date('Y-m-d H:i:s')
+            ],
+            'id = ?',
+            [$subscriptionId]
+        );
+        
+        $success = 'Your subscription has been canceled. You will continue to have access until the end of your current billing period.';
+        
+        // Refresh subscription data
+        $subscription = db_select(
+            "SELECT s.*, p.name as plan_name, p.price, p.interval, p.features 
+             FROM subscriptions s
+             JOIN subscription_plans p ON s.plan_id = p.id
+             WHERE s.user_id = ? AND s.status = 'active'
+             ORDER BY s.created_at DESC LIMIT 1", 
+            [$userId]
+        );
+    } catch (Exception $e) {
+        $error = 'Failed to cancel subscription: ' . $e->getMessage();
+        error_log("Subscription cancellation error: " . $e->getMessage());
+    }
 }
 
-// Function to format price
-function formatPrice($price, $currency = 'USD') {
-    return '$' . number_format($price, 2) . ' ' . $currency;
-}
-
-// Get usage statistics
-$usageStats = [
-    'paraphrasing' => db_select(
-        "SELECT COUNT(*) as count FROM text_processing_history 
-         WHERE user_id = ? AND processing_type = 'paraphrased'",
-        [$userId]
-    )[0]['count'] ?? 0,
-    
-    'plagiarism' => db_select(
-        "SELECT COUNT(*) as count FROM text_processing_history 
-         WHERE user_id = ? AND processing_type = 'plagiarism'",
-        [$userId]
-    )[0]['count'] ?? 0
-];
-
-// Get subscription tier limits
-$tierLimits = [
-    'Basic' => [
-        'paraphrasing' => 20,
-        'plagiarism' => 5
-    ],
-    'Premium' => [
-        'paraphrasing' => 999999, // Unlimited
-        'plagiarism' => 999999    // Unlimited
-    ],
-    'Professional' => [
-        'paraphrasing' => 999999, // Unlimited
-        'plagiarism' => 999999    // Unlimited
-    ]
-];
-
-// Get current tier
-$currentTier = $user['subscription_tier'] ?? 'Basic';
-$limits = $tierLimits[$currentTier] ?? $tierLimits['Basic'];
-
+// Set page title
+$pageTitle = 'My Subscription';
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Subscription | Text Processing Platform</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <title><?php echo $pageTitle; ?> - Text Processing Platform</title>
+    <link rel="stylesheet" href="assets/css/styles.css">
 </head>
-<body class="bg-gray-900 text-white min-h-screen">
-    <div class="container mx-auto px-4 py-8">
-        <header class="mb-8">
-            <h1 class="text-3xl font-bold text-purple-400">My Subscription</h1>
-            <p class="text-gray-400">Manage your subscription details and payment history</p>
+<body class="dark-theme">
+    <div class="container">
+        <header>
+            <h1>Text Processing Platform</h1>
+            <nav>
+                <ul>
+                    <li><a href="index.php">Home</a></li>
+                    <li><a href="dashboard.php">Dashboard</a></li>
+                    <li><a href="checkout.php">Subscriptions</a></li>
+                    <li><a href="my_subscription.php" class="active">My Subscription</a></li>
+                    <li><a href="logout.php">Log Out</a></li>
+                </ul>
+            </nav>
         </header>
-
-        <?php if ($cancelMessage): ?>
-            <div class="bg-green-800 text-white p-4 rounded mb-6">
-                <?php echo $cancelMessage; ?>
-            </div>
-        <?php endif; ?>
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <!-- Current Subscription -->
-            <div class="col-span-2">
-                <div class="bg-gray-800 rounded-lg p-6 shadow-lg">
-                    <h2 class="text-xl font-semibold mb-4 text-purple-300">Current Plan</h2>
-                    
-                    <?php if ($subscription): ?>
-                        <div class="mb-6">
-                            <div class="flex justify-between items-center mb-2">
-                                <span class="text-gray-400">Plan:</span>
-                                <span class="font-medium text-white"><?php echo htmlspecialchars($subscription['plan_name']); ?></span>
-                            </div>
-                            <div class="flex justify-between items-center mb-2">
-                                <span class="text-gray-400">Status:</span>
-                                <span class="font-medium <?php echo $subscription['cancel_at_period_end'] ? 'text-yellow-400' : 'text-green-400'; ?>">
-                                    <?php echo $subscription['cancel_at_period_end'] ? 'Cancels on ' . formatDate($subscription['current_period_end']) : 'Active'; ?>
-                                </span>
-                            </div>
-                            <div class="flex justify-between items-center mb-2">
-                                <span class="text-gray-400">Price:</span>
-                                <span class="font-medium text-white"><?php echo formatPrice($subscription['price']); ?>/<?php echo $subscription['interval']; ?></span>
-                            </div>
-                            <div class="flex justify-between items-center mb-2">
-                                <span class="text-gray-400">Current period:</span>
-                                <span class="font-medium text-white">
-                                    <?php echo formatDate($subscription['current_period_start']); ?> to 
-                                    <?php echo formatDate($subscription['current_period_end']); ?>
-                                </span>
-                            </div>
-                        </div>
+        
+        <main>
+            <section class="subscription-page">
+                <h2>My Subscription</h2>
+                
+                <?php if (!empty($error)): ?>
+                    <div class="error-message"><?php echo $error; ?></div>
+                <?php endif; ?>
+                
+                <?php if (!empty($success)): ?>
+                    <div class="success-message"><?php echo $success; ?></div>
+                <?php endif; ?>
+                
+                <?php if (empty($subscription)): ?>
+                    <div class="no-subscription">
+                        <p>You don't have an active subscription.</p>
+                        <p>Your current tier: <strong><?php echo htmlspecialchars($user['subscription_tier']); ?></strong></p>
+                        <p><a href="checkout.php" class="btn btn-primary">View Subscription Plans</a></p>
+                    </div>
+                <?php else: ?>
+                    <?php 
+                    $sub = $subscription[0];
+                    $isCanceled = $sub['cancel_at_period_end'] == 1;
+                    ?>
+                    <div class="subscription-details">
+                        <h3>Current Subscription</h3>
                         
-                        <?php if (!$subscription['cancel_at_period_end']): ?>
-                            <form method="post" onsubmit="return confirm('Are you sure you want to cancel your subscription? You will still have access until the end of the current billing period.');">
-                                <button type="submit" name="cancel_subscription" class="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded transition duration-200">
-                                    Cancel Subscription
-                                </button>
-                            </form>
-                        <?php endif; ?>
-                    <?php else: ?>
-                        <div class="text-center py-8">
-                            <p class="text-gray-400 mb-4">You don't have an active subscription plan.</p>
-                            <a href="#plans" class="bg-purple-600 hover:bg-purple-700 text-white py-2 px-6 rounded-lg transition duration-200">
-                                View Available Plans
-                            </a>
+                        <div class="subscription-card">
+                            <div class="subscription-header">
+                                <h4><?php echo htmlspecialchars($sub['plan_name']); ?> Plan</h4>
+                                <div class="subscription-status <?php echo $isCanceled ? 'canceled' : 'active'; ?>">
+                                    <?php echo $isCanceled ? 'Canceled' : 'Active'; ?>
+                                </div>
+                            </div>
+                            
+                            <div class="subscription-info">
+                                <p><strong>Price:</strong> $<?php echo number_format($sub['price'], 2); ?>/<?php echo $sub['interval']; ?></p>
+                                <p><strong>Started:</strong> <?php echo date('F j, Y', strtotime($sub['current_period_start'])); ?></p>
+                                <p>
+                                    <strong><?php echo $isCanceled ? 'Access until' : 'Next billing date'; ?>:</strong> 
+                                    <?php echo date('F j, Y', strtotime($sub['current_period_end'])); ?>
+                                </p>
+                                
+                                <?php if ($isCanceled): ?>
+                                    <p class="canceled-info">Your subscription has been canceled and will not renew.</p>
+                                    <p><a href="checkout.php" class="btn btn-secondary">Resubscribe</a></p>
+                                <?php else: ?>
+                                    <form method="post" action="my_subscription.php" onsubmit="return confirm('Are you sure you want to cancel your subscription? You will continue to have access until the end of your current billing period.');">
+                                        <button type="submit" name="cancel_subscription" class="btn btn-danger">Cancel Subscription</button>
+                                    </form>
+                                <?php endif; ?>
+                            </div>
+                            
+                            <div class="subscription-features">
+                                <h5>Features:</h5>
+                                <ul>
+                                    <?php 
+                                    $features = json_decode($sub['features'], true);
+                                    foreach ($features as $feature): 
+                                    ?>
+                                        <li><?php echo htmlspecialchars($feature); ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
                         </div>
+                    </div>
+                <?php endif; ?>
+                
+                <div class="payment-history">
+                    <h3>Payment History</h3>
+                    
+                    <?php if (empty($payments)): ?>
+                        <p>No payment history found.</p>
+                    <?php else: ?>
+                        <table class="payment-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Amount</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($payments as $payment): ?>
+                                    <tr>
+                                        <td><?php echo date('M j, Y', strtotime($payment['created_at'])); ?></td>
+                                        <td><?php echo $payment['currency']; ?> <?php echo number_format($payment['amount'], 2); ?></td>
+                                        <td>
+                                            <span class="payment-status <?php echo strtolower($payment['status']); ?>">
+                                                <?php echo ucfirst($payment['status']); ?>
+                                            </span>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
                     <?php endif; ?>
                 </div>
-            </div>
-
-            <!-- Usage Statistics -->
-            <div>
-                <div class="bg-gray-800 rounded-lg p-6 shadow-lg">
-                    <h2 class="text-xl font-semibold mb-4 text-purple-300">Usage Statistics</h2>
-                    
-                    <div class="space-y-4">
-                        <div>
-                            <div class="flex justify-between mb-1">
-                                <span class="text-gray-400">Paraphrasing</span>
-                                <span class="text-sm text-gray-300">
-                                    <?php echo $usageStats['paraphrasing']; ?>/<?php echo $limits['paraphrasing'] == 999999 ? '∞' : $limits['paraphrasing']; ?>
-                                </span>
-                            </div>
-                            <div class="w-full bg-gray-700 rounded-full h-2.5">
-                                <?php 
-                                $percentage = $limits['paraphrasing'] == 999999 ? 0 : min(100, ($usageStats['paraphrasing'] / $limits['paraphrasing']) * 100);
-                                ?>
-                                <div class="bg-purple-600 h-2.5 rounded-full" style="width: <?php echo $percentage; ?>%"></div>
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <div class="flex justify-between mb-1">
-                                <span class="text-gray-400">Plagiarism Checks</span>
-                                <span class="text-sm text-gray-300">
-                                    <?php echo $usageStats['plagiarism']; ?>/<?php echo $limits['plagiarism'] == 999999 ? '∞' : $limits['plagiarism']; ?>
-                                </span>
-                            </div>
-                            <div class="w-full bg-gray-700 rounded-full h-2.5">
-                                <?php 
-                                $percentage = $limits['plagiarism'] == 999999 ? 0 : min(100, ($usageStats['plagiarism'] / $limits['plagiarism']) * 100);
-                                ?>
-                                <div class="bg-purple-600 h-2.5 rounded-full" style="width: <?php echo $percentage; ?>%"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Available Plans -->
-        <div id="plans" class="mt-12">
-            <h2 class="text-2xl font-bold text-purple-400 mb-6">Available Plans</h2>
-            
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <?php foreach ($availablePlans as $plan): ?>
-                    <div class="bg-gray-800 rounded-lg overflow-hidden shadow-lg border-2 <?php echo $currentTier == $plan['name'] ? 'border-purple-500' : 'border-gray-700'; ?>">
-                        <div class="p-6">
-                            <h3 class="text-xl font-bold mb-2 text-purple-300"><?php echo htmlspecialchars($plan['name']); ?></h3>
-                            <div class="text-3xl font-bold mb-4">
-                                <?php echo formatPrice($plan['price']); ?>
-                                <span class="text-sm text-gray-400">/<?php echo $plan['interval']; ?></span>
-                            </div>
-                            <p class="text-gray-400 mb-6"><?php echo htmlspecialchars($plan['description']); ?></p>
-                            
-                            <ul class="space-y-3 mb-6">
-                                <?php 
-                                $features = json_decode($plan['features'], true);
-                                foreach ($features as $feature): 
-                                ?>
-                                    <li class="flex items-start">
-                                        <svg class="h-5 w-5 text-green-400 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                                        </svg>
-                                        <span class="text-gray-300"><?php echo htmlspecialchars($feature); ?></span>
-                                    </li>
-                                <?php endforeach; ?>
-                            </ul>
-                            
-                            <?php if ($currentTier == $plan['name']): ?>
-                                <button disabled class="w-full bg-purple-700 text-white py-2 rounded-lg opacity-70 cursor-not-allowed">
-                                    Current Plan
-                                </button>
-                            <?php else: ?>
-                                <a href="checkout.php?plan=<?php echo $plan['id']; ?>" class="block w-full bg-purple-600 hover:bg-purple-700 text-white text-center py-2 rounded-lg transition duration-200">
-                                    <?php echo $plan['price'] > 0 ? 'Subscribe' : 'Select Free Plan'; ?>
-                                </a>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-        </div>
-
-        <!-- Payment History -->
-        <?php if (!empty($paymentHistory)): ?>
-            <div class="mt-12">
-                <h2 class="text-2xl font-bold text-purple-400 mb-6">Payment History</h2>
                 
-                <div class="bg-gray-800 rounded-lg overflow-hidden shadow-lg">
-                    <table class="w-full">
-                        <thead>
-                            <tr class="bg-gray-700">
-                                <th class="py-3 px-4 text-left text-sm font-medium text-gray-300">Date</th>
-                                <th class="py-3 px-4 text-left text-sm font-medium text-gray-300">Description</th>
-                                <th class="py-3 px-4 text-left text-sm font-medium text-gray-300">Amount</th>
-                                <th class="py-3 px-4 text-left text-sm font-medium text-gray-300">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-700">
-                            <?php foreach ($paymentHistory as $payment): ?>
-                                <tr class="hover:bg-gray-700">
-                                    <td class="py-3 px-4 text-sm text-gray-300"><?php echo formatDate($payment['created_at']); ?></td>
-                                    <td class="py-3 px-4 text-sm text-gray-300">
-                                        <?php 
-                                        echo $payment['description'] ?? 'Subscription payment - ' . ($payment['plan_name'] ?? 'Unknown plan');
-                                        ?>
-                                    </td>
-                                    <td class="py-3 px-4 text-sm text-gray-300"><?php echo formatPrice($payment['amount'], $payment['currency']); ?></td>
-                                    <td class="py-3 px-4 text-sm">
-                                        <span class="px-2 py-1 rounded-full text-xs <?php echo $payment['status'] === 'succeeded' ? 'bg-green-900 text-green-300' : 'bg-yellow-900 text-yellow-300'; ?>">
-                                            <?php echo ucfirst($payment['status']); ?>
-                                        </span>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
+                <div class="subscription-faq">
+                    <h3>Frequently Asked Questions</h3>
+                    
+                    <div class="faq-item">
+                        <h4>How do I upgrade my subscription?</h4>
+                        <p>You can upgrade your subscription by visiting the <a href="checkout.php">Subscription Plans</a> page and selecting a new plan. Your current plan will be replaced with the new one immediately.</p>
+                    </div>
+                    
+                    <div class="faq-item">
+                        <h4>What happens when I cancel my subscription?</h4>
+                        <p>When you cancel your subscription, you will continue to have access to your plan's features until the end of your current billing period. After that, your account will revert to the Basic (free) tier.</p>
+                    </div>
+                    
+                    <div class="faq-item">
+                        <h4>How can I update my payment information?</h4>
+                        <p>To update your payment information, please visit your PayPal account and update your payment settings for this subscription.</p>
+                    </div>
                 </div>
-            </div>
-        <?php endif; ?>
+            </section>
+        </main>
         
-        <footer class="mt-16 text-center text-gray-500 text-sm">
-            <p>© <?php echo date('Y'); ?> Text Processing Platform. All rights reserved.</p>
+        <footer>
+            <p>&copy; <?php echo date('Y'); ?> Text Processing Platform. All rights reserved.</p>
         </footer>
     </div>
+    
+    <script src="assets/js/scripts.js"></script>
 </body>
 </html>

@@ -1,220 +1,209 @@
 <?php
 /**
- * PayPal Checkout Integration
+ * Checkout Page
  * 
- * This script handles PayPal checkout process for subscription plans
+ * Handles subscription checkout process with PayPal integration.
  */
+
+// Start session
+session_start();
 
 // Include database connection
 require_once 'db_connect.php';
 
-// Start session for user authentication
-session_start();
+// Initialize variables
+$error = '';
+$success = '';
+$planId = isset($_GET['plan']) ? intval($_GET['plan']) : 0;
 
-// Check if user is logged in, redirect if not
+// Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
+    // Redirect to login page
+    header('Location: login.php?redirect=checkout.php' . ($planId ? "?plan=$planId" : ''));
     exit();
 }
 
 $userId = $_SESSION['user_id'];
 
-// Check if plan ID is provided
-if (!isset($_GET['plan']) || !is_numeric($_GET['plan'])) {
-    header('Location: my_subscription.php');
-    exit();
-}
-
-$planId = (int)$_GET['plan'];
-
-// Get plan details
-$plan = db_select("SELECT * FROM subscription_plans WHERE id = ? AND is_active = 1", [$planId])[0] ?? null;
-if (!$plan) {
-    header('Location: my_subscription.php?error=invalid_plan');
-    exit();
-}
-
-// Get user details
+// Get user data
 $user = db_select("SELECT * FROM users WHERE id = ?", [$userId])[0] ?? null;
+
 if (!$user) {
+    // Invalid user ID
+    session_destroy();
     header('Location: login.php');
     exit();
 }
 
-// PayPal configuration
-$paypalConfig = [
-    'client_id' => 'YOUR_PAYPAL_CLIENT_ID', // Replace with your PayPal client ID
-    'client_secret' => 'YOUR_PAYPAL_CLIENT_SECRET', // Replace with your PayPal client secret
-    'environment' => 'sandbox', // 'sandbox' or 'production'
-    'currency' => 'USD',
-    'return_url' => 'https://yourdomain.com/database/process_payment.php', // Replace with your domain
-    'cancel_url' => 'https://yourdomain.com/database/my_subscription.php' // Replace with your domain
-];
+// Get available plans
+$plans = db_select("SELECT * FROM subscription_plans WHERE is_active = 1 ORDER BY price ASC");
 
-// Format price for display
-function formatPrice($price, $currency = 'USD') {
-    return '$' . number_format($price, 2) . ' ' . $currency;
+// Get selected plan
+$selectedPlan = null;
+if ($planId) {
+    foreach ($plans as $plan) {
+        if ($plan['id'] == $planId) {
+            $selectedPlan = $plan;
+            break;
+        }
+    }
 }
 
-// Calculate tax (if applicable)
-$taxRate = 0; // Set your tax rate here (e.g., 0.1 for 10%)
-$taxAmount = $plan['price'] * $taxRate;
-$totalAmount = $plan['price'] + $taxAmount;
+// Check if user already has an active subscription
+$activeSubscription = db_select(
+    "SELECT s.*, p.name as plan_name, p.price, p.interval 
+     FROM subscriptions s
+     JOIN subscription_plans p ON s.plan_id = p.id
+     WHERE s.user_id = ? AND s.status = 'active' AND s.current_period_end > NOW()",
+    [$userId]
+);
 
-// Set success message if coming from successful signup
-$successMessage = '';
-if (isset($_GET['signup']) && $_GET['signup'] == 'success') {
-    $successMessage = 'Your account has been created successfully! Now you can subscribe to a plan.';
-}
+$hasActiveSubscription = !empty($activeSubscription);
 
+// Set page title
+$pageTitle = 'Subscription Checkout';
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Checkout | Text Processing Platform</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <!-- PayPal JavaScript SDK -->
-    <script src="https://www.paypal.com/sdk/js?client-id=<?php echo $paypalConfig['client_id']; ?>&currency=<?php echo $paypalConfig['currency']; ?>"></script>
+    <title><?php echo $pageTitle; ?> - Text Processing Platform</title>
+    <link rel="stylesheet" href="assets/css/styles.css">
+    <script src="https://www.paypal.com/sdk/js?client-id=YOUR_PAYPAL_CLIENT_ID&currency=USD&vault=true"></script>
 </head>
-<body class="bg-gray-900 text-white min-h-screen">
-    <div class="container mx-auto px-4 py-8">
-        <header class="mb-8">
-            <h1 class="text-3xl font-bold text-purple-400">Checkout</h1>
-            <p class="text-gray-400">Complete your subscription purchase</p>
+<body class="dark-theme">
+    <div class="container">
+        <header>
+            <h1>Text Processing Platform</h1>
+            <nav>
+                <ul>
+                    <li><a href="index.php">Home</a></li>
+                    <li><a href="dashboard.php">Dashboard</a></li>
+                    <li><a href="checkout.php" class="active">Subscriptions</a></li>
+                    <li><a href="logout.php">Log Out</a></li>
+                </ul>
+            </nav>
         </header>
-
-        <?php if ($successMessage): ?>
-            <div class="bg-green-800 text-white p-4 rounded mb-6">
-                <?php echo $successMessage; ?>
-            </div>
-        <?php endif; ?>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <!-- Order Summary -->
-            <div>
-                <div class="bg-gray-800 rounded-lg p-6 shadow-lg">
-                    <h2 class="text-xl font-semibold mb-4 text-purple-300">Order Summary</h2>
-                    
-                    <div class="mb-6">
-                        <div class="flex justify-between items-center py-3 border-b border-gray-700">
-                            <span class="font-medium"><?php echo htmlspecialchars($plan['name']); ?> Plan</span>
-                            <span><?php echo formatPrice($plan['price']); ?></span>
-                        </div>
-                        
-                        <?php if ($taxRate > 0): ?>
-                        <div class="flex justify-between items-center py-3 border-b border-gray-700">
-                            <span>Tax</span>
-                            <span><?php echo formatPrice($taxAmount); ?></span>
-                        </div>
-                        <?php endif; ?>
-                        
-                        <div class="flex justify-between items-center py-3 font-semibold text-lg">
-                            <span>Total</span>
-                            <span class="text-purple-300"><?php echo formatPrice($totalAmount); ?></span>
-                        </div>
-                    </div>
-                    
-                    <div class="mb-4">
-                        <h3 class="font-medium text-purple-300 mb-2">Plan Features:</h3>
-                        <ul class="space-y-2 pl-5 text-gray-300">
-                            <?php 
-                            $features = json_decode($plan['features'], true);
-                            foreach ($features as $feature): 
-                            ?>
-                                <li class="flex items-start">
-                                    <svg class="h-5 w-5 text-green-400 mr-2 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                                    </svg>
-                                    <span><?php echo htmlspecialchars($feature); ?></span>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </div>
-                    
-                    <div class="text-sm text-gray-400">
-                        <p>You will be charged <?php echo formatPrice($totalAmount); ?> <?php echo strtolower($plan['interval']); ?>.</p>
-                        <p class="mt-1">You can cancel your subscription at any time from your account.</p>
-                    </div>
-                </div>
-                
-                <div class="mt-6">
-                    <a href="my_subscription.php" class="text-purple-400 hover:text-purple-300 inline-flex items-center">
-                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
-                        </svg>
-                        Back to plans
-                    </a>
-                </div>
-            </div>
-            
-            <!-- Payment Method -->
-            <div>
-                <div class="bg-gray-800 rounded-lg p-6 shadow-lg">
-                    <h2 class="text-xl font-semibold mb-4 text-purple-300">Payment Method</h2>
-                    
-                    <div class="mb-6">
-                        <p class="text-gray-300 mb-4">Complete your subscription purchase securely with PayPal.</p>
-                        
-                        <!-- PayPal Button Container -->
-                        <div id="paypal-button-container" class="mt-6"></div>
-                        
-                        <p class="text-sm text-gray-400 mt-4">
-                            By completing this purchase, you agree to our 
-                            <a href="#" class="text-purple-400 hover:text-purple-300">Terms of Service</a> and 
-                            <a href="#" class="text-purple-400 hover:text-purple-300">Privacy Policy</a>.
-                        </p>
-                    </div>
-                </div>
-                
-                <div class="mt-6 bg-gray-800 rounded-lg p-4 flex items-center">
-                    <svg class="w-6 h-6 text-green-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
-                    </svg>
-                    <span class="text-gray-300 text-sm">Your payment information is securely processed by PayPal. We do not store your payment details.</span>
-                </div>
-            </div>
-        </div>
         
-        <footer class="mt-16 text-center text-gray-500 text-sm">
-            <p>© <?php echo date('Y'); ?> Text Processing Platform. All rights reserved.</p>
+        <main>
+            <section class="checkout-page">
+                <h2>Choose Your Subscription Plan</h2>
+                
+                <?php if (!empty($error)): ?>
+                    <div class="error-message"><?php echo $error; ?></div>
+                <?php endif; ?>
+                
+                <?php if (!empty($success)): ?>
+                    <div class="success-message"><?php echo $success; ?></div>
+                <?php endif; ?>
+                
+                <?php if ($hasActiveSubscription): ?>
+                    <div class="subscription-info">
+                        <h3>Your Current Subscription</h3>
+                        <div class="subscription-details">
+                            <p><strong>Plan:</strong> <?php echo htmlspecialchars($activeSubscription[0]['plan_name']); ?></p>
+                            <p><strong>Price:</strong> $<?php echo number_format($activeSubscription[0]['price'], 2); ?>/<?php echo $activeSubscription[0]['interval']; ?></p>
+                            <p><strong>Status:</strong> Active</p>
+                            <p><strong>Renewal Date:</strong> <?php echo date('F j, Y', strtotime($activeSubscription[0]['current_period_end'])); ?></p>
+                        </div>
+                        <p>You can upgrade or change your plan at any time. Your current plan will remain active until the end of the billing period.</p>
+                        <p><a href="my_subscription.php" class="btn btn-secondary">Manage Subscription</a></p>
+                    </div>
+                <?php endif; ?>
+                
+                <div class="plans-container">
+                    <?php foreach ($plans as $plan): ?>
+                        <div class="plan-card <?php echo $selectedPlan && $selectedPlan['id'] == $plan['id'] ? 'selected' : ''; ?> <?php echo $plan['name'] === 'Premium' ? 'recommended' : ''; ?>">
+                            <?php if ($plan['name'] === 'Premium'): ?>
+                                <div class="plan-badge">Most Popular</div>
+                            <?php endif; ?>
+                            
+                            <h3><?php echo htmlspecialchars($plan['name']); ?></h3>
+                            
+                            <div class="plan-price">
+                                <span class="amount">$<?php echo number_format($plan['price'], 2); ?></span>
+                                <span class="interval">/<?php echo $plan['interval']; ?></span>
+                            </div>
+                            
+                            <div class="plan-features">
+                                <ul>
+                                    <?php 
+                                    $features = json_decode($plan['features'], true);
+                                    foreach ($features as $feature): 
+                                    ?>
+                                        <li><?php echo htmlspecialchars($feature); ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
+                            
+                            <?php if ($plan['price'] > 0): ?>
+                                <?php if ($selectedPlan && $selectedPlan['id'] == $plan['id']): ?>
+                                    <div class="checkout-section">
+                                        <div id="paypal-button-container-<?php echo $plan['id']; ?>"></div>
+                                        <script>
+                                            // Render the PayPal button for this plan
+                                            paypal.Buttons({
+                                                style: {
+                                                    layout: 'vertical',
+                                                    color: 'blue',
+                                                    shape: 'rect',
+                                                    label: 'subscribe'
+                                                },
+                                                createSubscription: function(data, actions) {
+                                                    return actions.subscription.create({
+                                                        'plan_id': '<?php echo $plan['paypal_plan_id']; ?>' // This should be your PayPal plan ID
+                                                    });
+                                                },
+                                                onApprove: function(data, actions) {
+                                                    // Capture the subscription ID for server-side processing
+                                                    console.log('Subscription approved: ' + data.subscriptionID);
+                                                    
+                                                    // Submit the subscription ID to your server
+                                                    window.location.href = 'process_payment.php?subscription_id=' + data.subscriptionID + '&plan_id=<?php echo $plan['id']; ?>';
+                                                }
+                                            }).render('#paypal-button-container-<?php echo $plan['id']; ?>');
+                                        </script>
+                                    </div>
+                                <?php else: ?>
+                                    <a href="checkout.php?plan=<?php echo $plan['id']; ?>" class="btn btn-primary">Select Plan</a>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <p>Free Plan</p>
+                                <?php if ($user['subscription_tier'] !== 'Basic'): ?>
+                                    <a href="downgrade_to_free.php" class="btn btn-secondary">Downgrade to Free</a>
+                                <?php else: ?>
+                                    <span class="btn btn-disabled">Current Plan</span>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+                
+                <div class="checkout-info">
+                    <h3>Subscription Benefits</h3>
+                    <ul>
+                        <li>Unlimited text paraphrasing</li>
+                        <li>Advanced plagiarism detection</li>
+                        <li>Multiple paraphrasing styles</li>
+                        <li>Priority customer support</li>
+                        <li>Cancel anytime</li>
+                    </ul>
+                    
+                    <div class="security-info">
+                        <p>All payments are securely processed through PayPal. We do not store your payment information.</p>
+                        <p>By subscribing, you agree to our <a href="terms.php">Terms of Service</a> and <a href="privacy.php">Privacy Policy</a>.</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+        
+        <footer>
+            <p>&copy; <?php echo date('Y'); ?> Text Processing Platform. All rights reserved.</p>
         </footer>
     </div>
     
-    <script>
-        // Render the PayPal button
-        paypal.Buttons({
-            // Set up the transaction
-            createOrder: function(data, actions) {
-                return actions.order.create({
-                    purchase_units: [{
-                        description: '<?php echo htmlspecialchars($plan['name'] . ' Plan - ' . $plan['interval']); ?>',
-                        amount: {
-                            value: '<?php echo number_format($totalAmount, 2, '.', ''); ?>'
-                        }
-                    }]
-                });
-            },
-            
-            // Finalize the transaction
-            onApprove: function(data, actions) {
-                return actions.order.capture().then(function(orderData) {
-                    // Successful capture! For demo purposes:
-                    // Store transaction details in our database
-                    const transaction = orderData.purchase_units[0].payments.captures[0];
-                    
-                    // Send to server to process the subscription
-                    window.location.href = '<?php echo $paypalConfig['return_url']; ?>?plan_id=<?php echo $planId; ?>&transaction_id=' + transaction.id + '&status=' + transaction.status;
-                });
-            },
-            
-            // Handle errors
-            onError: function(err) {
-                console.error('PayPal error:', err);
-                alert('There was an error processing your payment. Please try again or contact support.');
-            }
-        }).render('#paypal-button-container');
-    </script>
+    <script src="assets/js/scripts.js"></script>
 </body>
 </html>

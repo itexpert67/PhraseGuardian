@@ -1,45 +1,43 @@
 <?php
 /**
- * Database Connection Script
- * 
- * This file establishes a connection to your MySQL database and provides utility functions
+ * Database Connection and Utility Functions
+ *
+ * This file handles database connections and provides utility functions
  * for database operations.
- * 
- * IMPORTANT: Update the connection details with your actual database credentials.
  */
 
 // Database configuration
-define('DB_HOST', 'localhost');     // Change if your database is hosted elsewhere
-define('DB_NAME', 'text_processor'); // Change to your database name
-define('DB_USER', 'root');           // Change to your database username
-define('DB_PASS', '');               // Change to your database password
-
-// Error reporting
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+$db_config = [
+    'host' => 'localhost',
+    'username' => 'root',
+    'password' => '',
+    'database' => 'text_processor'
+];
 
 /**
- * Connect to the database
- * 
+ * Get database connection
+ *
  * @return PDO Database connection
  */
 function db_connect() {
-    static $pdo;
+    global $db_config;
     
-    if (!$pdo) {
+    static $pdo = null;
+    
+    if ($pdo === null) {
         try {
-            $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4";
+            $dsn = "mysql:host={$db_config['host']};dbname={$db_config['database']};charset=utf8mb4";
             $options = [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
+                PDO::ATTR_EMULATE_PREPARES => false
             ];
             
-            $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+            $pdo = new PDO($dsn, $db_config['username'], $db_config['password'], $options);
         } catch (PDOException $e) {
-            // Log the error but don't expose details in production
+            // Log the error
             error_log("Database connection failed: " . $e->getMessage());
-            die("Database connection failed. Please try again later.");
+            throw new Exception("Database connection failed");
         }
     }
     
@@ -48,91 +46,105 @@ function db_connect() {
 
 /**
  * Execute a SELECT query
- * 
- * @param string $query SQL query with placeholders
+ *
+ * @param string $query SQL query
  * @param array $params Parameters for prepared statement
- * @return array Results as associative array
+ * @return array Query results
  */
 function db_select($query, $params = []) {
     try {
-        $stmt = db_connect()->prepare($query);
+        $pdo = db_connect();
+        $stmt = $pdo->prepare($query);
         $stmt->execute($params);
         return $stmt->fetchAll();
     } catch (PDOException $e) {
-        error_log("Query failed: " . $e->getMessage());
-        return [];
+        error_log("Database query failed: " . $e->getMessage());
+        throw new Exception("Database query failed");
     }
 }
 
 /**
  * Execute an INSERT query
- * 
+ *
  * @param string $table Table name
- * @param array $data Associative array of column => value
- * @return int|false Last inserted ID or false on failure
+ * @param array $data Associative array of column => value pairs
+ * @return int|false Last insert ID or false on failure
  */
 function db_insert($table, $data) {
     try {
-        $columns = implode(', ', array_keys($data));
-        $placeholders = implode(', ', array_fill(0, count($data), '?'));
+        $pdo = db_connect();
         
-        $query = "INSERT INTO {$table} ({$columns}) VALUES ({$placeholders})";
-        $stmt = db_connect()->prepare($query);
+        $columns = array_keys($data);
+        $placeholders = array_fill(0, count($columns), '?');
+        
+        $columnString = implode(', ', $columns);
+        $placeholderString = implode(', ', $placeholders);
+        
+        $query = "INSERT INTO {$table} ({$columnString}) VALUES ({$placeholderString})";
+        
+        $stmt = $pdo->prepare($query);
         $stmt->execute(array_values($data));
         
-        return db_connect()->lastInsertId();
+        return $pdo->lastInsertId();
     } catch (PDOException $e) {
-        error_log("Insert failed: " . $e->getMessage());
-        return false;
+        error_log("Database insert failed: " . $e->getMessage());
+        throw new Exception("Database insert failed");
     }
 }
 
 /**
  * Execute an UPDATE query
- * 
+ *
  * @param string $table Table name
- * @param array $data Associative array of column => value
- * @param string $where WHERE clause
- * @param array $params Parameters for WHERE clause
- * @return int|false Number of affected rows or false on failure
+ * @param array $data Associative array of column => value pairs
+ * @param string $where Where clause
+ * @param array $whereParams Parameters for where clause
+ * @return int Number of affected rows
  */
-function db_update($table, $data, $where, $params = []) {
+function db_update($table, $data, $where, $whereParams = []) {
     try {
+        $pdo = db_connect();
+        
         $set = [];
         foreach ($data as $column => $value) {
             $set[] = "{$column} = ?";
         }
         
-        $query = "UPDATE {$table} SET " . implode(', ', $set) . " WHERE {$where}";
-        $stmt = db_connect()->prepare($query);
+        $setString = implode(', ', $set);
+        $query = "UPDATE {$table} SET {$setString} WHERE {$where}";
         
-        $values = array_merge(array_values($data), $params);
-        $stmt->execute($values);
+        $params = array_merge(array_values($data), $whereParams);
+        
+        $stmt = $pdo->prepare($query);
+        $stmt->execute($params);
         
         return $stmt->rowCount();
     } catch (PDOException $e) {
-        error_log("Update failed: " . $e->getMessage());
-        return false;
+        error_log("Database update failed: " . $e->getMessage());
+        throw new Exception("Database update failed");
     }
 }
 
 /**
  * Execute a DELETE query
- * 
+ *
  * @param string $table Table name
- * @param string $where WHERE clause
- * @param array $params Parameters for WHERE clause
- * @return int|false Number of affected rows or false on failure
+ * @param string $where Where clause
+ * @param array $params Parameters for where clause
+ * @return int Number of affected rows
  */
 function db_delete($table, $where, $params = []) {
     try {
+        $pdo = db_connect();
+        
         $query = "DELETE FROM {$table} WHERE {$where}";
-        $stmt = db_connect()->prepare($query);
+        
+        $stmt = $pdo->prepare($query);
         $stmt->execute($params);
         
         return $stmt->rowCount();
     } catch (PDOException $e) {
-        error_log("Delete failed: " . $e->getMessage());
-        return false;
+        error_log("Database delete failed: " . $e->getMessage());
+        throw new Exception("Database delete failed");
     }
 }
