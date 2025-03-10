@@ -1,70 +1,138 @@
 <?php
 /**
- * Database Connection for Text Paraphrasing and Plagiarism Checking App
+ * Database Connection Script
  * 
- * Use this file to connect to your MySQL database through phpMyAdmin
+ * This file establishes a connection to your MySQL database and provides utility functions
+ * for database operations.
+ * 
+ * IMPORTANT: Update the connection details with your actual database credentials.
  */
 
 // Database configuration
-$db_host = 'localhost';     // Change if your database is on a different server
-$db_name = 'text_processor'; // Your database name
-$db_user = 'root';          // Your database username
-$db_pass = '';              // Your database password
+define('DB_HOST', 'localhost');     // Change if your database is hosted elsewhere
+define('DB_NAME', 'text_processor'); // Change to your database name
+define('DB_USER', 'root');           // Change to your database username
+define('DB_PASS', '');               // Change to your database password
 
-// Create database connection
-try {
-    $pdo = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8mb4", $db_user, $db_pass);
+// Error reporting
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+/**
+ * Connect to the database
+ * 
+ * @return PDO Database connection
+ */
+function db_connect() {
+    static $pdo;
     
-    // Set error mode to exception
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    if (!$pdo) {
+        try {
+            $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4";
+            $options = [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+            ];
+            
+            $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+        } catch (PDOException $e) {
+            // Log the error but don't expose details in production
+            error_log("Database connection failed: " . $e->getMessage());
+            die("Database connection failed. Please try again later.");
+        }
+    }
     
-    // Set default fetch mode to associative array
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    
-    // Disable emulated prepared statements for real prepared statements
-    $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
-    
-    // echo "Connected successfully";
-} catch(PDOException $e) {
-    die("Connection failed: " . $e->getMessage());
+    return $pdo;
 }
 
 /**
- * Helper function to execute a query and fetch all results
+ * Execute a SELECT query
+ * 
+ * @param string $query SQL query with placeholders
+ * @param array $params Parameters for prepared statement
+ * @return array Results as associative array
  */
-function db_select($sql, $params = []) {
-    global $pdo;
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    return $stmt->fetchAll();
+function db_select($query, $params = []) {
+    try {
+        $stmt = db_connect()->prepare($query);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    } catch (PDOException $e) {
+        error_log("Query failed: " . $e->getMessage());
+        return [];
+    }
 }
 
 /**
- * Helper function to execute an insert query and return the last insert ID
+ * Execute an INSERT query
+ * 
+ * @param string $table Table name
+ * @param array $data Associative array of column => value
+ * @return int|false Last inserted ID or false on failure
  */
-function db_insert($sql, $params = []) {
-    global $pdo;
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    return $pdo->lastInsertId();
+function db_insert($table, $data) {
+    try {
+        $columns = implode(', ', array_keys($data));
+        $placeholders = implode(', ', array_fill(0, count($data), '?'));
+        
+        $query = "INSERT INTO {$table} ({$columns}) VALUES ({$placeholders})";
+        $stmt = db_connect()->prepare($query);
+        $stmt->execute(array_values($data));
+        
+        return db_connect()->lastInsertId();
+    } catch (PDOException $e) {
+        error_log("Insert failed: " . $e->getMessage());
+        return false;
+    }
 }
 
 /**
- * Helper function to execute an update query and return the number of affected rows
+ * Execute an UPDATE query
+ * 
+ * @param string $table Table name
+ * @param array $data Associative array of column => value
+ * @param string $where WHERE clause
+ * @param array $params Parameters for WHERE clause
+ * @return int|false Number of affected rows or false on failure
  */
-function db_update($sql, $params = []) {
-    global $pdo;
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    return $stmt->rowCount();
+function db_update($table, $data, $where, $params = []) {
+    try {
+        $set = [];
+        foreach ($data as $column => $value) {
+            $set[] = "{$column} = ?";
+        }
+        
+        $query = "UPDATE {$table} SET " . implode(', ', $set) . " WHERE {$where}";
+        $stmt = db_connect()->prepare($query);
+        
+        $values = array_merge(array_values($data), $params);
+        $stmt->execute($values);
+        
+        return $stmt->rowCount();
+    } catch (PDOException $e) {
+        error_log("Update failed: " . $e->getMessage());
+        return false;
+    }
 }
 
 /**
- * Helper function to execute a delete query and return the number of affected rows
+ * Execute a DELETE query
+ * 
+ * @param string $table Table name
+ * @param string $where WHERE clause
+ * @param array $params Parameters for WHERE clause
+ * @return int|false Number of affected rows or false on failure
  */
-function db_delete($sql, $params = []) {
-    global $pdo;
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    return $stmt->rowCount();
+function db_delete($table, $where, $params = []) {
+    try {
+        $query = "DELETE FROM {$table} WHERE {$where}";
+        $stmt = db_connect()->prepare($query);
+        $stmt->execute($params);
+        
+        return $stmt->rowCount();
+    } catch (PDOException $e) {
+        error_log("Delete failed: " . $e->getMessage());
+        return false;
+    }
 }
