@@ -6,33 +6,136 @@ import {
   InsertHistory,
   ParaphraseResponse,
   PlagiarismResponse,
-  PlagiarismMatch
+  PlagiarismMatch,
+  SubscriptionPlan,
+  InsertPlan,
+  Subscription,
+  InsertSubscription,
+  Payment,
+  InsertPayment
 } from "@shared/schema";
 
 // Modify the interface with any CRUD methods you might need
 export interface IStorage {
+  // User methods
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUser(id: number, data: Partial<User>): Promise<User>;
   
   // Text processing methods
   paraphraseText(text: string, style: string): Promise<ParaphraseResponse>;
   checkPlagiarism(text: string): Promise<PlagiarismResponse>;
   saveTextProcessingHistory(history: Omit<InsertHistory, "createdAt">): Promise<TextProcessingHistory>;
   getTextProcessingHistory(userId?: number): Promise<TextProcessingHistory[]>;
+  
+  // Subscription Plan methods
+  createPlan(plan: InsertPlan): Promise<SubscriptionPlan>;
+  getPlan(id: number): Promise<SubscriptionPlan | undefined>;
+  getAllPlans(activeOnly?: boolean): Promise<SubscriptionPlan[]>;
+  updatePlan(id: number, data: Partial<SubscriptionPlan>): Promise<SubscriptionPlan>;
+  
+  // Subscription methods
+  createSubscription(subscription: InsertSubscription): Promise<Subscription>;
+  getSubscription(id: number): Promise<Subscription | undefined>;
+  getUserSubscriptions(userId: number): Promise<Subscription[]>;
+  updateSubscription(id: number, data: Partial<Subscription>): Promise<Subscription>;
+  cancelSubscription(id: number): Promise<Subscription>;
+  
+  // Payment methods
+  createPayment(payment: InsertPayment): Promise<Payment>;
+  getPayment(id: number): Promise<Payment | undefined>;
+  getUserPayments(userId: number): Promise<Payment[]>;
+  updatePayment(id: number, data: Partial<Payment>): Promise<Payment>;
 }
 
 export class MemStorage implements IStorage {
   private users: Map<number, User>;
   private textProcessingHistory: Map<number, TextProcessingHistory>;
+  private subscriptionPlans: Map<number, SubscriptionPlan>;
+  private subscriptions: Map<number, Subscription>;
+  private payments: Map<number, Payment>;
   private currentUserId: number;
   private currentHistoryId: number;
+  private currentPlanId: number;
+  private currentSubscriptionId: number;
+  private currentPaymentId: number;
 
   constructor() {
     this.users = new Map();
     this.textProcessingHistory = new Map();
+    this.subscriptionPlans = new Map();
+    this.subscriptions = new Map();
+    this.payments = new Map();
     this.currentUserId = 1;
     this.currentHistoryId = 1;
+    this.currentPlanId = 1;
+    this.currentSubscriptionId = 1;
+    this.currentPaymentId = 1;
+    
+    // Initialize with default subscription plans
+    this.initializeDefaultPlans();
+  }
+  
+  private initializeDefaultPlans() {
+    const plans: InsertPlan[] = [
+      {
+        name: "Basic",
+        description: "Essential paraphrasing and plagiarism checking",
+        price: "0",
+        interval: "monthly",
+        stripePriceId: null,
+        features: JSON.stringify([
+          "20 paraphrasing operations per month",
+          "5 plagiarism checks per month",
+          "Basic styles (Standard, Simple)",
+          "Limited features"
+        ]),
+        isActive: true
+      },
+      {
+        name: "Premium",
+        description: "Advanced text processing with unlimited operations",
+        price: "9.99",
+        interval: "monthly",
+        stripePriceId: null,
+        features: JSON.stringify([
+          "Unlimited paraphrasing",
+          "Unlimited plagiarism checks",
+          "All paraphrasing styles",
+          "Priority processing",
+          "No ads",
+          "Download reports"
+        ]),
+        isActive: true
+      },
+      {
+        name: "Professional",
+        description: "Complete text processing suite for professionals",
+        price: "19.99",
+        interval: "monthly",
+        stripePriceId: null,
+        features: JSON.stringify([
+          "Everything in Premium",
+          "API access",
+          "Advanced grammar checking",
+          "Custom paraphrasing styles",
+          "Bulk processing",
+          "Document upload (DOCX, PDF)",
+          "Priority support"
+        ]),
+        isActive: true
+      }
+    ];
+    
+    plans.forEach(plan => {
+      const id = this.currentPlanId++;
+      this.subscriptionPlans.set(id, {
+        ...plan,
+        id,
+        createdAt: new Date()
+      });
+    });
   }
 
   async getUser(id: number): Promise<User | undefined> {
