@@ -278,60 +278,9 @@ export class MemStorage implements IStorage {
   }
 
   async checkPlagiarism(text: string): Promise<PlagiarismResponse> {
-    // Predefined phrases that we'll consider as "plagiarized" for demo purposes
-    const knownPhrases = [
-      {
-        text: "Scientists have documented significant alterations in terrestrial and marine environments",
-        source: "Climate Research Journal",
-        url: "https://climate-research.org/global-impacts/2023",
-        matchPercentage: 14
-      },
-      {
-        text: "highlighting the urgent need for coordinated international action to mitigate greenhouse gas emissions",
-        source: "IPCC Report",
-        url: "https://ipcc.ch/reports/ar6/summary-for-policymakers",
-        matchPercentage: 9
-      },
-      {
-        text: "with many species facing potential extinction due to habitat loss",
-        source: "Biodiversity Research",
-        url: "https://biodiversity-research.org/habitat-loss",
-        matchPercentage: 7
-      }
-    ];
-    
-    // Check for matches
-    const matches: PlagiarismMatch[] = [];
-    let totalMatchPercentage = 0;
-    
-    for (const phrase of knownPhrases) {
-      if (text.toLowerCase().includes(phrase.text.toLowerCase())) {
-        matches.push({
-          id: uuid(),
-          ...phrase
-        });
-        totalMatchPercentage += phrase.matchPercentage;
-      }
-    }
-    
-    // Cap total percentage at 100%
-    totalMatchPercentage = Math.min(totalMatchPercentage, 100);
-    
-    // Highlight plagiarized content
-    let highlightedText = text;
-    matches.forEach(match => {
-      // Create a case-insensitive RegExp to find the text
-      const regex = new RegExp(match.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-      highlightedText = highlightedText.replace(regex, 
-        `<span class="highlight-plagiarism">$&</span>`
-      );
-    });
-    
-    return {
-      text: highlightedText,
-      totalMatchPercentage,
-      matches
-    };
+    // Use the PlagiarismDetector for advanced detection
+    const { PlagiarismDetector } = await import('./plagiarism-detection/PlagiarismDetector');
+    return PlagiarismDetector.checkPlagiarism(text);
   }
 
   async saveTextProcessingHistory(historyData: Omit<InsertHistory, "createdAt">): Promise<TextProcessingHistory> {

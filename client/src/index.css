@@ -11,3 +11,73 @@
     @apply font-sans antialiased bg-background text-foreground;
   }
 }
+
+/* Plagiarism Highlighting */
+.highlight-plagiarism {
+  position: relative;
+  background-color: rgba(239, 68, 68, 0.2); /* red-500 with transparency */
+  border-bottom: 2px dotted rgba(239, 68, 68, 0.7);
+  padding: 0 2px;
+  cursor: help;
+  transition: background-color 0.2s ease;
+}
+
+.highlight-plagiarism:hover {
+  background-color: rgba(239, 68, 68, 0.3);
+}
+
+.highlight-plagiarism::before {
+  content: attr(title);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  border-radius: 4px;
+  background-color: #1e1e2e;
+  color: white;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  z-index: 10;
+}
+
+.highlight-plagiarism:hover::before {
+  visibility: visible;
+  opacity: 1;
+}
+
+.highlight-plagiarism::after {
+  content: attr(data-percentage) + "% match";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-20px);
+  padding: 4px 8px;
+  border-radius: 2px;
+  background-color: #ef4444;
+  color: white;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  z-index: 11;
+}
+
+.highlight-plagiarism:hover::after {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Changed text highlighting */
+.highlight-changed {
+  background-color: rgba(124, 58, 237, 0.15);  /* purple-600 with transparency */
+  border-bottom: 1px dotted rgba(124, 58, 237, 0.5);
+  padding: 0 2px;
+}
