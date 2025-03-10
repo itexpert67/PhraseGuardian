@@ -8,6 +8,7 @@ import TextEditor, { FormatCommand } from "@/components/text-processing/TextEdit
 import ParaphrasingOptions, { ParaphrasingStyle } from "@/components/text-processing/ParaphrasingOptions";
 import ResultsArea, { ParaphraseResult } from "@/components/text-processing/ResultsArea";
 import PlagiarismResults, { PlagiarismResult } from "@/components/text-processing/PlagiarismResults";
+import AdvancedPlagiarismResults from "@/components/text-processing/AdvancedPlagiarismResults";
 import { useTextEditor } from "@/hooks/use-text-editor";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -369,7 +370,7 @@ export default function Home() {
                 originalText={text}
               />
             ) : activeTab === "plagiarism" ? (
-              <PlagiarismResults 
+              <AdvancedPlagiarismResults 
                 result={plagiarismResult}
                 isLoading={isProcessing}
                 onFixPlagiarism={handleFixPlagiarism}
